@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>音频处理 Agent</title>
+<style>
+  body { font-family: sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+  input, button { padding: 6px 10px; margin: 4px 0; }
+  input[type=text] { width: 400px; }
+  .card { border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin: 8px 0; }
+  .round-item { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+  #status { padding: 10px; background: #f5f5f5; border-radius: 4px; white-space: pre; }
+</style>
+</head>
+<body>
+<h2>🎵 音频处理 Agent 配置</h2>
+
+<div class="card">
+  <h3>扫描模型</h3>
+  <input id="scan-path" type="text" placeholder="模型目录路径，如 E:\UVR5-UI\models">
+  <button onclick="scanModels()">扫描</button>
+  <div id="model-list"></div>
+</div>
+
+<div class="card">
+  <h3>创建 Agent</h3>
+  <input id="agent-name" type="text" placeholder="Agent 名称"><br>
+  <input id="model-path" type="text" placeholder="模型目录路径"><br>
+  <input id="output-path" type="text" placeholder="输出目录路径"><br>
+  <div id="rounds-container"></div>
+  <button onclick="addRound()">+ 添加一轮</button><br><br>
+  <button onclick="createAgent()">✅ 创建 Agent</button>
+</div>
+
+<div class="card">
+  <h3>已有 Agent</h3>
+  <button onclick="loadAgents()">刷新列表</button>
+  <div id="agent-list"></div>
+</div>
+
+<div class="card">
+  <h3>运行任务</h3>
+  <select id="run-agent-id" style="padding:6px;width:200px"></select>
+  <input id="music-path" type="text" placeholder="音频文件绝对路径">
+  <button onclick="runTask()">▶ 开始处理</button>
+
+  <div style="margin-top:12px;">
+    <div style="background:#eee;border-radius:4px;overflow:hidden;height:22px;">
+      <div id="progress-bar" style="height:100%;width:0%;background:#4caf50;
+           transition:width .3s;color:#fff;text-align:center;line-height:22px;font-size:12px;">0%</div>
+    </div>
+    <div id="status" style="margin-top:8px;padding:10px;background:#f5f5f5;
+         border-radius:4px;white-space:pre-wrap;">等待任务...</div>
+    <div id="result" style="margin-top:8px;"></div>
+  </div>
+</div>
+
+<script>
+let scannedModels = {};
+let pollTimer = null;
+
+async function scanModels() {
+  const path = document.getElementById('scan-path').value.trim();
+  const res = await fetch(`/api/models?path=${encodeURIComponent(path)}`);
+  if (!res.ok) { alert(await res.text()); return; }
+  scannedModels = await res.json();
+  const div = document.getElementById('model-list');
+  div.innerHTML = Object.entries(scannedModels).map(([i, p]) =>
+    `<div>${i}: ${p.split(/[\\/]/).pop()}</div>`).join('');
+}
+
+function addRound() {
+  const c = document.getElementById('rounds-container');
+  const idx = c.children.length;
+  const options = Object.entries(scannedModels).map(([i, p]) =>
+    `<option value="${p.split(/[\\/]/).pop()}">${p.split(/[\\/]/).pop()}</option>`).join('');
+  c.innerHTML += `<div class="round-item">第${idx+1}轮：<select>${options || '<option>请先扫描模型</option>'}</select>
+    <button onclick="this.parentElement.remove()">✕</button></div>`;
+}
+
+async function createAgent() {
+  const rounds = [...document.querySelectorAll('#rounds-container select')].map(s => s.value);
+  if (!rounds.length) { alert('请至少添加一轮'); return; }
+  const body = {
+    name: document.getElementById('agent-name').value,
+    model_load_path: document.getElementById('model-path').value,
+    result_output: document.getElementById('output-path').value,
+    rounds
+  };
+  const res = await fetch('/api/agents', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await res.json();
+  alert(`✅ 创建成功，ID: ${data.id}`);
+  loadAgents();
+}
+
+async function loadAgents() {
+  const res = await fetch('/api/agents');
+  const agents = await res.json();
+  const sel = document.getElementById('run-agent-id');
+  sel.innerHTML = '';
+  document.getElementById('agent-list').innerHTML = Object.entries(agents).map(([id, a]) =>
+    `<div class="card"><b>${a.name}</b> (${id}) — ${a.rounds.length} 轮<button onclick="deleteAgent('${id}')">删除</button></div>`).join('') || '暂无 Agent';
+  Object.entries(agents).forEach(([id, a]) => {
+    sel.innerHTML += `<option value="${id}">${a.name} (${id})</option>`;
+  });
+}
+
+async function deleteAgent(id) {
+  await fetch(`/api/agents/${id}`, { method: 'DELETE' });
+  loadAgents();
+}
+
+async function runTask() {
+  const agent_id = document.getElementById('run-agent-id').value;
+  const music_path = document.getElementById('music-path').value.trim();
+  if (!agent_id || !music_path) { alert('请选择 Agent 并填写音频路径'); return; }
+  document.getElementById('result').innerHTML = '';
+  document.getElementById('progress-bar').style.width = '0%';
+  document.getElementById('progress-bar').textContent = '0%';
+  const res = await fetch('/api/run', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ agent_id, music_path })
+  });
+  if (!res.ok) { alert(await res.text()); return; }
+  const { task_id } = await res.json();
+  document.getElementById('status').textContent = `任务 ${task_id} 已提交...`;
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(() => pollTask(task_id), 1000);
+}
+
+async function pollTask(task_id) {
+  const res = await fetch(`/api/tasks/${task_id}`);
+  const t = await res.json();
+  const bar = document.getElementById('progress-bar');
+  const s = document.getElementById('status');
+  const r = document.getElementById('result');
+  bar.style.width = (t.progress || 0) + '%';
+  bar.textContent = (t.progress || 0) + '%';
+  if (t.status === 'running' || t.status === 'pending') {
+    s.textContent = `⏳ ${t.message || ''}  (第 ${t.current_round}/${t.total_rounds} 轮)`;
+  } else if (t.status === 'done') {
+    s.textContent = `✅ 处理完成！`;
+    r.innerHTML = `
+      <div class="card" style="background:#e8f5e9;">
+        <b>📁 任务目录：</b><code>${t.task_dir}</code><br>
+        <b>🎵 最终人声文件：</b><code>${t.final_file}</code>
+      </div>`;
+    clearInterval(pollTimer);
+  } else if (t.status === 'error') {
+    s.textContent = `❌ 错误: ${t.error}`;
+    bar.style.background = '#f44336';
+    clearInterval(pollTimer);
+  }
+}
+
+loadAgents();
+</script>
+</body>
+</html>
