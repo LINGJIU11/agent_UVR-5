@@ -1,9 +1,33 @@
-api/__pycache__/agent_store.cpython-312.pyc
-core/__pycache__/__init__.cpython-312.pyc
-core/__pycache__/模型加载类.cpython-312.pyc
-core/__pycache__/模型权重检索.cpython-312.pyc
-core/__pycache__/流程创建2.cpython-312.pyc
-core/__pycache__/流程逻辑基础.cpython-312.pyc
-api/__pycache__/routes.cpython-312.pyc
-UVR5/
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 虚拟环境 / 依赖
+uvr5/
+venv/
+env/
+.venv/
+
+# 运行时数据
 agents.json
+*.log
+
+# 嵌套仓库
+UVR-git/
+
+# 临时文件
+*.tmp
+*.temp
