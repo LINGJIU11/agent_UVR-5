@@ -1,5 +1,17 @@
-fastapi
-uvicorn
-torch
-audio_separator
-onnxruntime
+# UVR5 音频处理流水线依赖
+#
+# 安装方式 (GPU版):
+#   pip install -r requirements.txt
+#
+# 安装方式 (CPU版):
+#   把 audio-separator[gpu] 改为 audio-separator[cpu]
+
+# 核心：音频分离引擎
+audio-separator[gpu]>=0.44.1
+
+# Web 服务
+fastapi>=0.136.0
+uvicorn[standard]>=0.47.0
+
+# 工具
+pydantic>=2.0.0
