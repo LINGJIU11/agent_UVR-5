@@ -39,6 +39,23 @@
 </div>
 
 <div class="card">
+  <h3>批量处理（整个文件夹）</h3>
+  <select id="batch-agent-id" style="padding:6px;width:200px"></select>
+  <input id="batch-folder-path" type="text" placeholder="音频文件夹绝对路径">
+  <button onclick="runBatchTask()">▶ 批量处理</button>
+
+  <div style="margin-top:12px;">
+    <div style="background:#eee;border-radius:4px;overflow:hidden;height:22px;">
+      <div id="batch-progress-bar" style="height:100%;width:0%;background:#2196f3;
+           transition:width .3s;color:#fff;text-align:center;line-height:22px;font-size:12px;">0%</div>
+    </div>
+    <div id="batch-status" style="margin-top:8px;padding:10px;background:#f5f5f5;
+         border-radius:4px;white-space:pre-wrap;">等待任务...</div>
+    <div id="batch-result" style="margin-top:8px;"></div>
+  </div>
+</div>
+
+<div class="card">
   <h3>运行任务</h3>
   <select id="run-agent-id" style="padding:6px;width:200px"></select>
   <input id="music-path" type="text" placeholder="音频文件绝对路径">
@@ -96,12 +113,19 @@ async function createAgent() {
 async function loadAgents() {
   const res = await fetch('/api/agents');
   const agents = await res.json();
+  // 单文件任务选择
   const sel = document.getElementById('run-agent-id');
   sel.innerHTML = '';
   document.getElementById('agent-list').innerHTML = Object.entries(agents).map(([id, a]) =>
     `<div class="card"><b>${a.name}</b> (${id}) — ${a.rounds.length} 轮<button onclick="deleteAgent('${id}')">删除</button></div>`).join('') || '暂无 Agent';
   Object.entries(agents).forEach(([id, a]) => {
     sel.innerHTML += `<option value="${id}">${a.name} (${id})</option>`;
+  });
+  // 批量任务选择
+  const batchSel = document.getElementById('batch-agent-id');
+  batchSel.innerHTML = '';
+  Object.entries(agents).forEach(([id, a]) => {
+    batchSel.innerHTML += `<option value="${id}">${a.name} (${id})</option>`;
   });
 }
 
@@ -151,6 +175,52 @@ async function pollTask(task_id) {
     s.textContent = `❌ 错误: ${t.error}`;
     bar.style.background = '#f44336';
     clearInterval(pollTimer);
+  }
+}
+
+let batchPollTimer = null;
+
+async function runBatchTask() {
+  const agent_id = document.getElementById('batch-agent-id').value;
+  const folder_path = document.getElementById('batch-folder-path').value.trim();
+  if (!agent_id || !folder_path) { alert('请选择 Agent 并填写文件夹路径'); return; }
+  document.getElementById('batch-result').innerHTML = '';
+  document.getElementById('batch-progress-bar').style.width = '0%';
+  document.getElementById('batch-progress-bar').textContent = '0%';
+  const res = await fetch('/api/batch-run', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ agent_id, folder_path })
+  });
+  if (!res.ok) { alert(await res.text()); return; }
+  const { batch_task_id } = await res.json();
+  document.getElementById('batch-status').textContent = `批量任务 ${batch_task_id} 已提交...`;
+  if (batchPollTimer) clearInterval(batchPollTimer);
+  batchPollTimer = setInterval(() => pollBatchTask(batch_task_id), 1000);
+}
+
+async function pollBatchTask(batch_task_id) {
+  const res = await fetch(`/api/batch-tasks/${batch_task_id}`);
+  const t = await res.json();
+  const bar = document.getElementById('batch-progress-bar');
+  const s = document.getElementById('batch-status');
+  const r = document.getElementById('batch-result');
+  bar.style.width = (t.progress || 0) + '%';
+  bar.textContent = (t.progress || 0) + '%';
+  if (t.status === 'running' || t.status === 'pending') {
+    s.textContent = `⏳ ${t.message || ''}  (${t.completed_files || 0}/${t.total_files || '?'} 个文件)`;
+  } else if (t.status === 'done') {
+    s.textContent = `✅ 批量处理完成！共 ${t.results ? t.results.length : 0} 个文件`;
+    r.innerHTML = (t.results || []).map(r =>
+      `<div class="card" style="background:#e8f5e9;font-size:13px;">
+        <b>📄 ${r.file.split(/[\\/]/).pop()}</b><br>
+        <code>${r.final_file}</code>
+      </div>`).join('');
+    clearInterval(batchPollTimer);
+  } else if (t.status === 'error') {
+    s.textContent = `❌ 错误: ${t.error}`;
+    bar.style.background = '#f44336';
+    clearInterval(batchPollTimer);
   }
 }
 
